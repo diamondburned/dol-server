@@ -20,36 +20,8 @@ if (!window.SugarCube) {
     alert("SugarCube not found after loading #story");
 }
 const SugarCube = window.SugarCube;
-function canSave() {
-    return SugarCube.Save.ok() && (!SugarCube.Config.saves.isAllowed || SugarCube.Config.saves.isAllowed());
-}
-function lastEventTimestamp() {
-    const history = SugarCube.State["history"];
-    if (!history) return null;
-    const lastEvent = history.last();
-    const timestamp = lastEvent?.variables?.["timeStamp"];
-    if (!timestamp) return null;
-    return timestamp;
-}
-async function sync() {
-    if (SugarCube.State.active.title == "Start") {
-        const resp = await fetch("/x/autosync/merge");
-        const body = await resp.json();
-        if (body.data == null) return;
-        const localTimestamp = lastEventTimestamp();
-        if (!localTimestamp || localTimestamp < body.date) {
-            SugarCube.Save.deserialize(body.data);
-            await notifyOverwrite();
-        }
-        return;
-    }
-    if (!canSave()) {
-        return;
-    }
-    const localTimestamp = lastEventTimestamp();
-    if (!localTimestamp) {
-        return;
-    }
+async function sync(date, shouldMerge = true) {
+    console.debug("autosync: syncing", new Date(date));
     const save = SugarCube.Save.serialize();
     if (save == null) {
         return;
@@ -57,7 +29,7 @@ async function sync() {
     const resp = await fetch("/x/autosync/merge", {
         method: "POST",
         body: JSON.stringify({
-            date: localTimestamp,
+            date,
             data: save
         })
     });
@@ -69,23 +41,58 @@ async function sync() {
             }
         case "error":
             {
-                SugarCube.UI.alert(body.data.error);
-                break;
+                throw new Error(body.data.error);
             }
         case "outdated":
             {
-                SugarCube.Save.deserialize(body.data.data);
-                await notifyOverwrite();
+                if (!shouldMerge) {
+                    await promptAlert(removeIndentation(`
+          Your save is outdated.
+          Please manually load the latest save.
+        `));
+                    break;
+                }
+                const override = await promptOverride();
+                if (override) {
+                    SugarCube.Save.deserialize(body.data.data);
+                    SugarCube.Save.autosave.load();
+                }
                 break;
             }
     }
 }
-async function notifyOverwrite() {
-    await new Promise((resolve)=>{
-        SugarCube.UI.alert(removeIndentation(`
-        Overwrote current saves with server saves.
-        Please manually load the latest save.
-      `), null, ()=>resolve());
+async function checkSync() {
+    const autosave = SugarCube.Save.autosave.get();
+    const date = autosave?.date;
+    const resp = await fetch("/x/autosync/merge");
+    const body = await resp.json();
+    if (date != null && date > body.date) {
+        return;
+    }
+    SugarCube.Save.deserialize(body.data);
+    SugarCube.Save.autosave.load();
+}
+function promptAlert(msg) {
+    return new Promise((resolve)=>{
+        SugarCube.UI.alert(msg, null, resolve);
+    });
+}
+function promptOverride() {
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = true;
+    const label = document.createElement("label");
+    label.appendChild(checkbox);
+    label.appendChild(document.createTextNode("Override after closing this dialog"));
+    return new Promise((resolve)=>{
+        SugarCube.Dialog.setup("Autosave", "autosync-prompt-override");
+        SugarCube.Dialog.append(removeIndentation(`
+      Your save is outdated.
+      Would you like to override your save with the server save?
+    `));
+        SugarCube.Dialog.append(document.createElement("br"));
+        SugarCube.Dialog.append(label);
+        SugarCube.Dialog.open(null, ()=>resolve(checkbox.checked));
     });
 }
 function removeIndentation(str) {
@@ -94,8 +101,33 @@ function removeIndentation(str) {
     str = str.replace(/\n+/g, " ");
     return str;
 }
-const schedule = async ()=>{
-    await sync();
-    setTimeout(schedule, 5000);
-};
-schedule();
+let saving = false;
+let saveLaterDate = null;
+function saveHook(save) {
+    console.debug("autosync: saving");
+    saveLaterDate = save.date;
+    if (saving) {
+        console.debug("autosync: delaying save until current save is done");
+        return;
+    }
+    (async function() {
+        while(saveLaterDate != null){
+            saving = true;
+            const saveDate = saveLaterDate;
+            saveLaterDate = null;
+            try {
+                await sync(saveDate);
+            } catch (err) {
+                await promptAlert("Error syncing save: " + err);
+                break;
+            } finally{
+                saving = false;
+            }
+        }
+    })();
+}
+(async function() {
+    await checkSync();
+    SugarCube.Save.onSave.add(saveHook);
+    setInterval(()=>SugarCube.Save.autosave.save(), 15000);
+})();

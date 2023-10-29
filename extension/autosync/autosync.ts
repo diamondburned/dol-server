@@ -49,53 +49,8 @@ type MergeData = {
   data: string | null;
 };
 
-function canSave(): boolean {
-  return SugarCube.Save.ok() &&
-    (!SugarCube.Config.saves.isAllowed || SugarCube.Config.saves.isAllowed());
-}
-
-// lastEventTimestamp returns the timestamp of the last event in the history
-// stack. If there is no history, or the last event has no timestamp, it returns
-// null.
-function lastEventTimestamp(): number | null {
-  const history = SugarCube.State["history"];
-  if (!history) return null;
-
-  const lastEvent = history.last();
-
-  const timestamp = lastEvent?.variables?.["timeStamp"];
-  if (!timestamp) return null;
-
-  return timestamp;
-}
-
-async function sync() {
-  if (SugarCube.State.active.title == "Start") {
-    // We can't serialize saves from the start screen.
-    // Try to just restore the save from the server.
-    const resp = await fetch("/x/autosync/merge");
-    const body = await resp.json() as MergeData;
-    if (body.data == null) return;
-
-    const localTimestamp = lastEventTimestamp();
-    if (!localTimestamp || localTimestamp < body.date) {
-      // If the server save is newer, overwrite the current save.
-      SugarCube.Save.deserialize(body.data);
-      await notifyOverwrite();
-    }
-
-    return;
-  }
-
-  if (!canSave()) {
-    return;
-  }
-
-  const localTimestamp = lastEventTimestamp();
-  if (!localTimestamp) {
-    // Cannot save. Make no effort to sync.
-    return;
-  }
+async function sync(date: number, shouldMerge = true) {
+  console.debug("autosync: syncing", new Date(date));
 
   const save = SugarCube.Save.serialize();
   if (save == null) {
@@ -105,7 +60,7 @@ async function sync() {
   const resp = await fetch("/x/autosync/merge", {
     method: "POST",
     body: JSON.stringify({
-      date: localTimestamp,
+      date,
       data: save,
     } as MergeData),
   });
@@ -116,29 +71,77 @@ async function sync() {
       break;
     }
     case "error": {
-      SugarCube.UI.alert(body.data.error);
-      break;
+      throw new Error(body.data.error);
     }
     case "outdated": {
-      SugarCube.Save.deserialize(body.data.data);
-      await notifyOverwrite();
+      if (!shouldMerge) {
+        await promptAlert(removeIndentation(`
+          Your save is outdated.
+          Please manually load the latest save.
+        `));
+        break;
+      }
+
+      const override = await promptOverride();
+      if (override) {
+        SugarCube.Save.deserialize(body.data.data);
+        SugarCube.Save.autosave.load();
+      }
+
       break;
     }
   }
 }
 
-// notifyOverwrite notifies the user that their save was overwritten by a newer
-// save from the server. It blocks until the user clicks OK.
-async function notifyOverwrite() {
-  await new Promise<void>((resolve) => {
-    SugarCube.UI.alert(
-      removeIndentation(`
-        Overwrote current saves with server saves.
-        Please manually load the latest save.
-      `),
-      null,
-      () => resolve(),
-    );
+// checkSync checks if the current save is outdated and prompts the user to
+// override their save with a newer save from the server if it is.
+async function checkSync() {
+  const autosave = SugarCube.Save.autosave.get();
+  const date = autosave?.date;
+
+  const resp = await fetch("/x/autosync/merge");
+  const body = await resp.json() as MergeData;
+
+  if (date != null && date > body.date) {
+    return;
+  }
+
+  // The server save is newer than the current save or there is no current save.
+  SugarCube.Save.deserialize(body.data);
+  SugarCube.Save.autosave.load();
+}
+
+// promptAlert prompts the user with an alert dialog. It blocks until the user
+// closes the prompt.
+function promptAlert(msg: string): Promise<void> {
+  return new Promise<void>((resolve) => {
+    SugarCube.UI.alert(msg, null, resolve);
+  });
+}
+
+// promptOverride prompts the user to override their save with a newer save
+// from the server. It blocks until the user closes the prompt and returns
+// whether the user chose to override their save.
+function promptOverride(): Promise<boolean> {
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = true;
+
+  const label = document.createElement("label");
+  label.appendChild(checkbox);
+  label.appendChild(
+    document.createTextNode("Override after closing this dialog"),
+  );
+
+  return new Promise<boolean>((resolve) => {
+    SugarCube.Dialog.setup("Autosave", "autosync-prompt-override");
+    SugarCube.Dialog.append(removeIndentation(`
+      Your save is outdated.
+      Would you like to override your save with the server save?
+    `));
+    SugarCube.Dialog.append(document.createElement("br"));
+    SugarCube.Dialog.append(label);
+    SugarCube.Dialog.open(null, () => resolve(checkbox.checked));
   });
 }
 
@@ -149,11 +152,57 @@ function removeIndentation(str: string) {
   return str;
 }
 
-const syncInterval = 5000;
+let saving = false;
+let saveLaterDate: number | null = null;
 
-const schedule = async () => {
-  await sync();
-  // Reschedule the next sync.
-  setTimeout(schedule, syncInterval);
-};
-schedule();
+function saveHook(save: sugarcube.SaveObject) {
+  console.debug("autosync: saving");
+  saveLaterDate = save.date;
+
+  if (saving) {
+    // Delay saving until the current save is done.
+    console.debug("autosync: delaying save until current save is done");
+    return;
+  }
+
+  (async function () {
+    while (saveLaterDate != null) {
+      saving = true;
+
+      // saveLaterDate may change while we're syncing, so save it now.
+      // We will recheck it after syncing.
+      const saveDate = saveLaterDate;
+      saveLaterDate = null;
+
+      try {
+        await sync(saveDate);
+      } catch (err) {
+        await promptAlert("Error syncing save: " + err);
+        break;
+      } finally {
+        saving = false;
+      }
+    }
+  })();
+}
+
+// Autosave every passage change. Best if "Preserve history when refreshing a
+// page" is false.
+//
+// Disabling this because it causes large performance issues on every scene
+// change, probably due to how the game is structured.
+
+// SugarCube.Config.saves.autosave = true;
+
+(async function () {
+  // Trigger the sync right now to get the latest save.
+  // Wait until the overriden save is loaded before registering the autosave
+  // hook and checking for outdated saves.
+  await checkSync();
+
+  // Register the save hook.
+  SugarCube.Save.onSave.add(saveHook);
+
+  // Autosave every 15 seconds in addition to passage changes.
+  setInterval(() => SugarCube.Save.autosave.save(), 15000);
+})();
