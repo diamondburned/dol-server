@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"golang.org/x/exp/slog"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -34,13 +35,22 @@ func NewExtensionsManagerFromExtensions(extensionConfigs map[string]json.RawMess
 	extensions := make([]extension, 0, len(extensionInfos))
 
 	for _, ext := range extensionInfos {
-		e, err := ext.New(extensionConfigs[ext.ID])
+		ecfg, ok := extensionConfigs[ext.ID]
+		if !ok {
+			slog.Debug(
+				"skipping extension since no config was provided",
+				"extension", ext.ID)
+			continue
+		}
+
+		e, err := ext.New(ecfg)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("failed to create extension %q: %w", ext.ID, err)
 			}
 			continue
 		}
+
 		extensions = append(extensions, extension{e, ext.ID})
 	}
 
