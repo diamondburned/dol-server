@@ -7,10 +7,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	_ "embed"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/httplog/v2"
 	"libdb.so/dol-server/extension"
 	"libdb.so/dol-server/internal/httputil"
 )
@@ -36,13 +39,31 @@ func newDoLServer(gamePath string, extensions *extension.ExtensionsManager) (htt
 		return nil, fmt.Errorf("failed to patch DoL HTML file: %w", err)
 	}
 
-	fs := http.FileServer(http.Dir(gamePath))
-
 	r := chi.NewMux()
+	r.Use(middleware.Compress(5))
+
+	// chi's httplog is awfully designed. There currently is no way to set the
+	// level of logging that httplog does, so we'll just disable it entirely.
+	//
+	// See https://github.com/go-chi/httplog/issues/28.
+	if !verbose {
+		r.Use(httplog.RequestLogger(&httplog.Logger{
+			Logger: slog.Default(),
+			Options: httplog.Options{
+				QuietDownRoutes: []string{
+					"/img",
+					"/style.css",
+				},
+				QuietDownPeriod: 10 * time.Second,
+				Concise:         true,
+			},
+		}))
+	}
+
 	extensions.BindRouter(r)
 
 	r.Get("/", httputil.BytesServer("text/html", dolHTML))
-	r.Mount("/", fs)
+	r.Mount("/", http.FileServer(http.Dir(gamePath)))
 
 	return r, nil
 }
