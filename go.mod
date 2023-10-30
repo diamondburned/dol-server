@@ -13,13 +13,6 @@ require (
 )
 
 require (
-	github.com/go-chi/httplog v0.3.1 // indirect
-	github.com/go-http-utils/etag v0.0.0-20161124023236-513ea8f21eb1 // indirect
-	github.com/go-http-utils/fresh v0.0.0-20161124030543-7231e26a4b27 // indirect
-	github.com/go-http-utils/headers v0.0.0-20181008091004-fed159eddc2a // indirect
-	github.com/mattn/go-colorable v0.1.13 // indirect
-	github.com/mattn/go-isatty v0.0.19 // indirect
-	github.com/rs/zerolog v1.29.1 // indirect
 	golang.org/x/sys v0.13.0 // indirect
 	gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405 // indirect
 )
