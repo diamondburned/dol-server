@@ -2,24 +2,130 @@
 // deno-lint-ignore-file
 // This code was bundled using `deno bundle` and it's not recommended to edit it manually
 
-if (document.getElementById("story") === null) {
-    await new Promise((resolve)=>{
-        const observer = new MutationObserver(()=>{
-            const story = document.getElementById("story");
-            if (story !== null) {
-                observer.disconnect();
-                resolve();
-            }
-        });
-        observer.observe(document.body, {
-            childList: true
-        });
-    });
+function html(strings, ...values) {
+    const parts = [
+        strings[0]
+    ];
+    for(let i = 0; i < values.length; i++){
+        parts.push(String(values[i]));
+        parts.push(strings[i + 1]);
+    }
+    return parts.join("");
 }
-if (!window.SugarCube) {
-    alert("SugarCube not found after loading #story");
+async function waitForSugarCube() {
+    if (document.getElementById("story") === null) {
+        await new Promise((resolve)=>{
+            const observer = new MutationObserver(()=>{
+                const story = document.getElementById("story");
+                if (story !== null) {
+                    observer.disconnect();
+                    resolve();
+                }
+            });
+            observer.observe(document.body, {
+                childList: true
+            });
+        });
+    }
+    if (!window.SugarCube) {
+        alert("SugarCube not found after loading #story");
+    }
+    return window.SugarCube;
 }
-const SugarCube = window.SugarCube;
+await waitForSugarCube();
+const toast = document.createElement("div");
+toast.classList.add("autosave-toast");
+const story = document.getElementById("story");
+function updateToastPosition(saveListVisible) {
+    const customOverlayContent = document.getElementById("customOverlayContent");
+    if (saveListVisible) {
+        if (toast.parentElement == story) {
+            toast.removeAttribute("style");
+            toast.style.display = "inline-block";
+            story.removeChild(toast);
+        }
+        if (toast.parentElement != customOverlayContent) {
+            customOverlayContent.prepend(toast);
+        }
+    } else {
+        if (customOverlayContent && toast.parentElement == customOverlayContent) {
+            customOverlayContent.removeChild(toast);
+        }
+        if (!story.contains(toast)) {
+            toast.removeAttribute("style");
+            toast.style.position = "fixed";
+            toast.style.fontSize = "0.9em";
+            toast.style.top = "0";
+            story.append(toast);
+        }
+    }
+}
+const saveListHandlers = [
+    updateToastPosition
+];
+function onSaveListReveal(handler) {
+    saveListHandlers.push(handler);
+}
+function saveListIsVisible() {
+    const customOverlay = document.getElementById("customOverlayContainer");
+    const saveList = document.getElementById("saveList");
+    return true && !!saveList && !!customOverlay && !customOverlay.classList.contains("hidden");
+}
+let saveListWasVisible = false;
+function dispatchSaveListHandlers() {
+    const saveListVisible = saveListIsVisible();
+    if (saveListVisible != saveListWasVisible) {
+        saveListWasVisible = saveListVisible;
+        saveListHandlers.forEach((handler)=>handler(saveListVisible));
+    }
+}
+const storyObserver = new MutationObserver(()=>dispatchSaveListHandlers());
+storyObserver.observe(story, {
+    subtree: true,
+    attributeFilter: [
+        "class"
+    ]
+});
+dispatchSaveListHandlers();
+let timeout = null;
+let killedExportWarning = false;
+function showFor(duration, html) {
+    show(html);
+    timeout = setTimeout(()=>clear(), duration);
+}
+function clear() {
+    toast.innerHTML = "";
+    toast.classList.add("hidden");
+    if (timeout != null) {
+        clearTimeout(timeout);
+    }
+    if (killedExportWarning) {
+        const exportWarning = document.getElementById("export-warning");
+        if (exportWarning) {
+            exportWarning.classList.remove("hidden");
+            killedExportWarning = false;
+        }
+    }
+}
+function show(html) {
+    clear();
+    toast.innerHTML = html;
+    toast.classList.remove("hidden");
+    updateToastPosition(saveListIsVisible());
+    const exportWarning = document.getElementById("export-warning");
+    if (exportWarning && !exportWarning.classList.contains("hidden")) {
+        exportWarning.classList.add("hidden");
+        killedExportWarning = true;
+    }
+}
+function notifySaved(message = "Save has been synchronized!") {
+    showFor(5000, html`<span class="green">${message}</span>`);
+}
+function notifyError(error) {
+    show(html`<mouse class="tooltip red">Error occured while synchronizing!<span>${error}</span></mouse>`);
+}
+clear();
+const SugarCube = await waitForSugarCube();
 async function sync(date, shouldMerge = true) {
     console.debug("autosync: syncing", new Date(date));
     const save = SugarCube.Save.serialize();
@@ -103,31 +209,44 @@ function removeIndentation(str) {
 }
 let saving = false;
 let saveLaterDate = null;
-function saveHook(save) {
-    console.debug("autosync: saving");
+async function saveHook(save) {
+    if (saveLaterDate == save.date) {
+        console.debug("autosync: same save, skipping");
+        return;
+    }
     saveLaterDate = save.date;
     if (saving) {
         console.debug("autosync: delaying save until current save is done");
         return;
     }
-    (async function() {
-        while(saveLaterDate != null){
-            saving = true;
-            const saveDate = saveLaterDate;
-            saveLaterDate = null;
-            try {
-                await sync(saveDate);
-            } catch (err) {
-                await promptAlert("Error syncing save: " + err);
-                break;
-            } finally{
-                saving = false;
-            }
+    console.debug("autosync: saving");
+    while(saveLaterDate != null){
+        saving = true;
+        const saveDate = saveLaterDate;
+        saveLaterDate = null;
+        try {
+            await sync(saveDate);
+            notifySaved();
+        } catch (err) {
+            notifyError(err);
+        } finally{
+            saving = false;
         }
-    })();
+    }
 }
-(async function() {
+try {
     await checkSync();
-    SugarCube.Save.onSave.add(saveHook);
-    setInterval(()=>SugarCube.Save.autosave.save(), 15000);
-})();
+    notifySaved("Save has been restored!");
+} catch (err) {
+    notifyError(err);
+}
+SugarCube.Save.onSave.add((save)=>{
+    saveHook(save);
+});
+onSaveListReveal((saveListReveal)=>{
+    if (saveListReveal) {
+        console.debug("autosync: save dialog opened, autosaving...");
+        SugarCube.Save.autosave.save();
+    }
+});
+setInterval(()=>SugarCube.Save.autosave.save(), 15000);

@@ -1,30 +1,9 @@
+import * as autosaveToast from "./autosync_toast.ts";
+import { onSaveListReveal } from "./autosync_toast.ts";
+import { waitForSugarCube } from "#/lib/sugarcube.ts";
 import sugarcube from "https://esm.sh/v133/@types/twine-sugarcube@2.36.7";
 
-declare global {
-  interface Window {
-    SugarCube: sugarcube.SugarCubeObject | undefined;
-  }
-}
-
-// Block until #story is loaded.
-if (document.getElementById("story") === null) {
-  await new Promise<void>((resolve) => {
-    const observer = new MutationObserver(() => {
-      const story = document.getElementById("story");
-      if (story !== null) {
-        observer.disconnect();
-        resolve();
-      }
-    });
-    observer.observe(document.body, { childList: true });
-  });
-}
-
-if (!window.SugarCube) {
-  alert("SugarCube not found after loading #story");
-}
-
-const SugarCube = window.SugarCube;
+const SugarCube = await waitForSugarCube();
 
 type MergeResult =
   | {
@@ -155,8 +134,7 @@ function removeIndentation(str: string) {
 let saving = false;
 let saveLaterDate: number | null = null;
 
-function saveHook(save: sugarcube.SaveObject) {
-  console.debug("autosync: saving");
+async function saveHook(save: sugarcube.SaveObject) {
   saveLaterDate = save.date;
 
   if (saving) {
@@ -165,44 +143,50 @@ function saveHook(save: sugarcube.SaveObject) {
     return;
   }
 
-  (async function () {
-    while (saveLaterDate != null) {
-      saving = true;
+  console.debug("autosync: saving");
 
-      // saveLaterDate may change while we're syncing, so save it now.
-      // We will recheck it after syncing.
-      const saveDate = saveLaterDate;
-      saveLaterDate = null;
+  while (saveLaterDate != null) {
+    saving = true;
 
-      try {
-        await sync(saveDate);
-      } catch (err) {
-        await promptAlert("Error syncing save: " + err);
-        break;
-      } finally {
-        saving = false;
-      }
+    // saveLaterDate may change while we're syncing, so save it now.
+    // We will recheck it after syncing.
+    const saveDate = saveLaterDate;
+    saveLaterDate = null;
+
+    try {
+      await sync(saveDate);
+      autosaveToast.notifySaved();
+    } catch (err) {
+      autosaveToast.notifyError(err);
+    } finally {
+      saving = false;
     }
-  })();
+  }
 }
 
-// Autosave every passage change. Best if "Preserve history when refreshing a
-// page" is false.
-//
-// Disabling this because it causes large performance issues on every scene
-// change, probably due to how the game is structured.
-
-// SugarCube.Config.saves.autosave = true;
-
-(async function () {
-  // Trigger the sync right now to get the latest save.
-  // Wait until the overriden save is loaded before registering the autosave
-  // hook and checking for outdated saves.
+// Trigger the sync right now to get the latest save.
+// Wait until the overriden save is loaded before registering the autosave
+// hook and checking for outdated saves.
+try {
   await checkSync();
+  autosaveToast.notifySaved("Save has been restored!");
+} catch (err) {
+  autosaveToast.notifyError(err);
+}
 
-  // Register the save hook.
-  SugarCube.Save.onSave.add(saveHook);
+// Register the save hook, but don't return the Promise so that the save hook
+// can finish before the Promise resolves.
+SugarCube.Save.onSave.add((save) => {
+  saveHook(save);
+});
 
-  // Autosave every 15 seconds in addition to passage changes.
-  setInterval(() => SugarCube.Save.autosave.save(), 15000);
-})();
+// Autosave when the user opens the save dialog.
+onSaveListReveal((saveListReveal) => {
+  if (saveListReveal) {
+    console.debug("autosync: save dialog opened, autosaving...");
+    SugarCube.Save.autosave.save();
+  }
+});
+
+// Autosave every minute in addition to the dialog autosave.
+setInterval(() => SugarCube.Save.autosave.save(), 15000);
