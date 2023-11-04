@@ -125,79 +125,133 @@ function notifyError(error) {
 }
 clear();
 const SugarCube = await waitForSugarCube();
-async function sync(date, shouldMerge = true) {
-    console.debug("autosync: syncing", new Date(date));
-    const save = SugarCube.Save.serialize();
-    if (save == null) {
+let lastHash = null;
+function overrideLocal(data, hash) {
+    lastHash = hash;
+    SugarCube.Save.deserialize(data);
+}
+async function sync() {
+    console.debug("autosync: syncing");
+    const data = SugarCube.Save.serialize();
+    if (data == null) {
         return;
     }
     const resp = await fetch("/x/autosync/merge", {
         method: "POST",
         body: JSON.stringify({
-            date,
-            data: save
+            data,
+            last_hash: lastHash
         })
     });
     const body = await resp.json();
     switch(body.result){
         case "ok":
             {
+                lastHash = body.data.hash;
                 break;
             }
         case "error":
             {
                 throw new Error(body.data.error);
             }
-        case "outdated":
+        case "conflict":
             {
-                if (!shouldMerge) {
-                    await promptAlert(removeIndentation(`
-          Your save is outdated.
-          Please manually load the latest save.
-        `));
-                    break;
-                }
-                const override = await promptOverride();
-                if (override) {
-                    SugarCube.Save.deserialize(body.data.data);
-                    SugarCube.Save.autosave.load();
-                }
+                await handleOverride(data, body.data.save, body.data.server_hash);
                 break;
             }
     }
 }
 async function checkSync() {
     const autosave = SugarCube.Save.autosave.get();
-    const date = autosave?.date;
-    const resp = await fetch("/x/autosync/merge");
-    const body = await resp.json();
-    if (date != null && date > body.date) {
+    if (autosave && SugarCube.Config.saves.isAllowed()) {
+        await sync();
         return;
     }
-    SugarCube.Save.deserialize(body.data);
-    SugarCube.Save.autosave.load();
+    const resp = await fetch("/x/autosync/save");
+    const body = await resp.json();
+    if (body.save == null) {
+        if (SugarCube.Config.saves.isAllowed()) {
+            await sync();
+        }
+        return;
+    }
+    overrideLocal(body.save.data, body.server_hash);
 }
-function promptAlert(msg) {
-    return new Promise((resolve)=>{
-        SugarCube.UI.alert(msg, null, resolve);
-    });
+async function handleOverride(clientData, serverSave, serverHash) {
+    const override = await promptOverride(serverSave.date);
+    switch(override){
+        case OverrideChoice.Local:
+            {
+                overrideLocal(serverSave.data, serverHash);
+                break;
+            }
+        case OverrideChoice.Server:
+            {
+                const resp = await fetch("/x/autosync/merge?override=1", {
+                    method: "POST",
+                    body: JSON.stringify({
+                        data: clientData
+                    })
+                });
+                const body = await resp.json();
+                if (body.result != "ok") {
+                    throw new Error("failed to override save");
+                }
+                lastHash = body.data.hash;
+                break;
+            }
+    }
 }
-function promptOverride() {
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = true;
-    const label = document.createElement("label");
-    label.appendChild(checkbox);
-    label.appendChild(document.createTextNode("Override after closing this dialog"));
+var OverrideChoice;
+(function(OverrideChoice) {
+    OverrideChoice[OverrideChoice["Local"] = 0] = "Local";
+    OverrideChoice[OverrideChoice["Server"] = 1] = "Server";
+})(OverrideChoice || (OverrideChoice = {}));
+function promptOverride(serverDate = null) {
+    const div = document.createElement("div");
+    div.classList.add("autosync-prompt-override");
+    if (serverDate != null) {
+        const serverDateString = new Date(serverDate).toLocaleString();
+        const info = document.createElement("div");
+        info.classList.add("autosync-prompt-override-info");
+        info.innerHTML = html`
+      <span>Server save date: ${serverDateString}</span>
+    `;
+        div.append(info);
+    }
+    const form = document.createElement("form");
+    form.innerHTML = html`
+    <label>
+      <input type="radio" name="override" value="local" checked>
+      Override with server save
+    </label>
+    <br />
+    <label>
+      <input type="radio" name="override" value="server">
+      Override with local save
+    </label>
+  `;
+    div.append(form);
     return new Promise((resolve)=>{
         SugarCube.Dialog.setup("Autosave", "autosync-prompt-override");
         SugarCube.Dialog.append(removeIndentation(`
-      Your save is outdated.
-      Would you like to override your save with the server save?
+      Your local save is outdated.
+      Would you like to override it with the server save?
     `));
         SugarCube.Dialog.append(document.createElement("br"));
-        SugarCube.Dialog.append(label);
-        SugarCube.Dialog.open(null, ()=>resolve(checkbox.checked));
+        SugarCube.Dialog.append(form);
+        SugarCube.Dialog.open(null, ()=>{
+            const formData = new FormData(form);
+            const override = formData.get("override");
+            switch(override){
+                case "local":
+                    resolve(OverrideChoice.Local);
+                    break;
+                case "server":
+                    resolve(OverrideChoice.Server);
+                    break;
+            }
+        });
     });
 }
 function removeIndentation(str) {
@@ -207,26 +261,20 @@ function removeIndentation(str) {
     return str;
 }
 let saving = false;
-let saveLaterDate = null;
-async function saveHook(save) {
-    saveLaterDate = save.date;
+async function saveHook() {
     if (saving) {
         console.debug("autosync: delaying save until current save is done");
         return;
     }
     console.debug("autosync: saving");
-    while(saveLaterDate != null){
-        saving = true;
-        const saveDate = saveLaterDate;
-        saveLaterDate = null;
-        try {
-            await sync(saveDate);
-            notifySaved();
-        } catch (err) {
-            notifyError(err);
-        } finally{
-            saving = false;
-        }
+    saving = true;
+    try {
+        await sync();
+        notifySaved();
+    } catch (err) {
+        notifyError(err);
+    } finally{
+        saving = false;
     }
 }
 try {
@@ -235,8 +283,8 @@ try {
 } catch (err) {
     notifyError(err);
 }
-SugarCube.Save.onSave.add((save)=>{
-    saveHook(save);
+SugarCube.Save.onSave.add(()=>{
+    saveHook();
 });
 onSaveListReveal((saveListReveal)=>{
     if (saveListReveal) {

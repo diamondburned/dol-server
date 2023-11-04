@@ -1,72 +1,76 @@
-import * as autosaveToast from "./autosync_toast.ts";
-import { onSaveListReveal } from "./autosync_toast.ts";
+import * as autosaveToast from "#/extension/autosync/autosync_toast.ts";
+import { onSaveListReveal } from "#/extension/autosync/autosync_toast.ts";
 import { waitForSugarCube } from "#/lib/sugarcube.ts";
-import sugarcube from "https://esm.sh/v133/@types/twine-sugarcube@2.36.7";
+import { html } from "https://deno.land/x/html@v1.2.0/mod.ts";
 
 const SugarCube = await waitForSugarCube();
 
-type MergeResult =
-  | {
-    result: "ok";
-    data: {
-      changed: boolean;
-    };
-  }
-  | {
-    result: "error";
-    data: {
-      error: string;
-    };
-  }
-  | {
-    result: "outdated";
-    data: MergeData;
-  };
+type MergeResult = MergeOK | MergeError | MergeConflict;
 
-type MergeData = {
-  date: number;
-  data: string | null;
+type MergeOK = {
+  result: "ok";
+  data: {
+    consistent: boolean;
+    hash: string;
+  };
 };
 
-async function sync(date: number, shouldMerge = true) {
-  console.debug("autosync: syncing", new Date(date));
+type MergeError = {
+  result: "error";
+  data: {
+    error: string;
+  };
+};
 
-  const save = SugarCube.Save.serialize();
-  if (save == null) {
+type MergeConflict = {
+  result: "conflict";
+  data: {
+    save: SaveData | null;
+    server_hash?: string;
+  };
+};
+
+type SaveData = {
+  data: string | null;
+  date: number;
+};
+
+// lastDataHash is initialized by checkSync and is used to determine if the
+// current save is outdated. It is maintained by sync.
+let lastHash: string | null = null;
+
+function overrideLocal(data: string, hash: string) {
+  lastHash = hash;
+  SugarCube.Save.deserialize(data);
+}
+
+async function sync() {
+  console.debug("autosync: syncing");
+
+  const data = SugarCube.Save.serialize();
+  if (data == null) {
     return;
   }
 
   const resp = await fetch("/x/autosync/merge", {
     method: "POST",
     body: JSON.stringify({
-      date,
-      data: save,
-    } as MergeData),
+      data,
+      last_hash: lastHash,
+    }),
   });
 
   const body = await resp.json() as MergeResult;
   switch (body.result) {
     case "ok": {
+      lastHash = body.data.hash;
       break;
     }
     case "error": {
       throw new Error(body.data.error);
     }
-    case "outdated": {
-      if (!shouldMerge) {
-        await promptAlert(removeIndentation(`
-          Your save is outdated.
-          Please manually load the latest save.
-        `));
-        break;
-      }
-
-      const override = await promptOverride();
-      if (override) {
-        SugarCube.Save.deserialize(body.data.data);
-        SugarCube.Save.autosave.load();
-      }
-
+    case "conflict": {
+      await handleOverride(data, body.data.save, body.data.server_hash);
       break;
     }
   }
@@ -76,18 +80,27 @@ async function sync(date: number, shouldMerge = true) {
 // override their save with a newer save from the server if it is.
 async function checkSync() {
   const autosave = SugarCube.Save.autosave.get();
-  const date = autosave?.date;
-
-  const resp = await fetch("/x/autosync/merge");
-  const body = await resp.json() as MergeData;
-
-  if (date != null && date > body.date) {
+  if (autosave && SugarCube.Config.saves.isAllowed()) {
+    // Local also has a save. Try to do an actual sync.
+    await sync();
     return;
   }
 
-  // The server save is newer than the current save or there is no current save.
-  SugarCube.Save.deserialize(body.data);
-  SugarCube.Save.autosave.load();
+  const resp = await fetch("/x/autosync/save");
+  const body = await resp.json() as {
+    save: SaveData | null;
+    server_hash?: string;
+  };
+  if (body.save == null) {
+    // Opportunistically sync if the server has no save.
+    if (SugarCube.Config.saves.isAllowed()) {
+      await sync();
+    }
+    return;
+  }
+
+  // Server has a save, but local does not. Override local with server.
+  overrideLocal(body.save.data, body.server_hash!);
 }
 
 // promptAlert prompts the user with an alert dialog. It blocks until the user
@@ -98,29 +111,96 @@ function promptAlert(msg: string): Promise<void> {
   });
 }
 
+// handleOverride takes care of calling promptOverride and handling the user's
+// choice.
+async function handleOverride(
+  clientData: string,
+  serverSave: SaveData,
+  serverHash: string,
+) {
+  const override = await promptOverride(serverSave.date);
+  switch (override) {
+    case OverrideChoice.Local: {
+      overrideLocal(serverSave.data, serverHash);
+      break;
+    }
+    case OverrideChoice.Server: {
+      const resp = await fetch("/x/autosync/merge?override=1", {
+        method: "POST",
+        body: JSON.stringify({
+          data: clientData,
+        }),
+      });
+
+      const body = await resp.json() as MergeResult;
+      if (body.result != "ok") {
+        throw new Error("failed to override save");
+      }
+
+      lastHash = body.data.hash;
+      break;
+    }
+  }
+}
+
+enum OverrideChoice {
+  Local, // override local save with server save
+  Server, // override server save with local save
+}
+
 // promptOverride prompts the user to override their save with a newer save
 // from the server. It blocks until the user closes the prompt and returns
 // whether the user chose to override their save.
-function promptOverride(): Promise<boolean> {
-  const checkbox = document.createElement("input");
-  checkbox.type = "checkbox";
-  checkbox.checked = true;
+function promptOverride(
+  serverDate: number | null = null,
+): Promise<OverrideChoice> {
+  const div = document.createElement("div");
+  div.classList.add("autosync-prompt-override");
 
-  const label = document.createElement("label");
-  label.appendChild(checkbox);
-  label.appendChild(
-    document.createTextNode("Override after closing this dialog"),
-  );
+  if (serverDate != null) {
+    const serverDateString = new Date(serverDate).toLocaleString();
+    const info = document.createElement("div");
+    info.classList.add("autosync-prompt-override-info");
+    info.innerHTML = html`
+      <span>Server save date: ${serverDateString}</span>
+    `;
+    div.append(info);
+  }
 
-  return new Promise<boolean>((resolve) => {
+  const form = document.createElement("form");
+  form.innerHTML = html`
+    <label>
+      <input type="radio" name="override" value="local" checked>
+      Override with server save
+    </label>
+    <br />
+    <label>
+      <input type="radio" name="override" value="server">
+      Override with local save
+    </label>
+  `;
+  div.append(form);
+
+  return new Promise<OverrideChoice>((resolve) => {
     SugarCube.Dialog.setup("Autosave", "autosync-prompt-override");
     SugarCube.Dialog.append(removeIndentation(`
-      Your save is outdated.
-      Would you like to override your save with the server save?
+      Your local save is outdated.
+      Would you like to override it with the server save?
     `));
     SugarCube.Dialog.append(document.createElement("br"));
-    SugarCube.Dialog.append(label);
-    SugarCube.Dialog.open(null, () => resolve(checkbox.checked));
+    SugarCube.Dialog.append(form);
+    SugarCube.Dialog.open(null, () => {
+      const formData = new FormData(form);
+      const override = formData.get("override") as string;
+      switch (override) {
+        case "local":
+          resolve(OverrideChoice.Local);
+          break;
+        case "server":
+          resolve(OverrideChoice.Server);
+          break;
+      }
+    });
   });
 }
 
@@ -132,11 +212,8 @@ function removeIndentation(str: string) {
 }
 
 let saving = false;
-let saveLaterDate: number | null = null;
 
-async function saveHook(save: sugarcube.SaveObject) {
-  saveLaterDate = save.date;
-
+async function saveHook() {
   if (saving) {
     // Delay saving until the current save is done.
     console.debug("autosync: delaying save until current save is done");
@@ -144,23 +221,15 @@ async function saveHook(save: sugarcube.SaveObject) {
   }
 
   console.debug("autosync: saving");
+  saving = true;
 
-  while (saveLaterDate != null) {
-    saving = true;
-
-    // saveLaterDate may change while we're syncing, so save it now.
-    // We will recheck it after syncing.
-    const saveDate = saveLaterDate;
-    saveLaterDate = null;
-
-    try {
-      await sync(saveDate);
-      autosaveToast.notifySaved();
-    } catch (err) {
-      autosaveToast.notifyError(err);
-    } finally {
-      saving = false;
-    }
+  try {
+    await sync();
+    autosaveToast.notifySaved();
+  } catch (err) {
+    autosaveToast.notifyError(err);
+  } finally {
+    saving = false;
   }
 }
 
@@ -176,8 +245,8 @@ try {
 
 // Register the save hook, but don't return the Promise so that the save hook
 // can finish before the Promise resolves.
-SugarCube.Save.onSave.add((save) => {
-  saveHook(save);
+SugarCube.Save.onSave.add(() => {
+  saveHook();
 });
 
 // Autosave when the user opens the save dialog.
