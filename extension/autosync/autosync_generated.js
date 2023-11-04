@@ -12,21 +12,20 @@ function html(strings, ...values) {
     }
     return parts.join("");
 }
+const initPromise = new Promise((resolve)=>{
+    const observer = new MutationObserver(()=>{
+        const story = document.getElementById("story");
+        if (story !== null) {
+            observer.disconnect();
+            resolve();
+        }
+    });
+    observer.observe(document.body, {
+        childList: true
+    });
+});
 async function waitForSugarCube() {
-    if (document.getElementById("story") === null) {
-        await new Promise((resolve)=>{
-            const observer = new MutationObserver(()=>{
-                const story = document.getElementById("story");
-                if (story !== null) {
-                    observer.disconnect();
-                    resolve();
-                }
-            });
-            observer.observe(document.body, {
-                childList: true
-            });
-        });
-    }
+    await initPromise;
     if (!window.SugarCube) {
         alert("SugarCube not found after loading #story");
     }
@@ -210,10 +209,6 @@ function removeIndentation(str) {
 let saving = false;
 let saveLaterDate = null;
 async function saveHook(save) {
-    if (saveLaterDate == save.date) {
-        console.debug("autosync: same save, skipping");
-        return;
-    }
     saveLaterDate = save.date;
     if (saving) {
         console.debug("autosync: delaying save until current save is done");
