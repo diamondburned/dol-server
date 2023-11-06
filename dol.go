@@ -46,7 +46,7 @@ func newDoLServer(gamePath string, extensions *extension.ExtensionsManager) (htt
 	// level of logging that httplog does, so we'll just disable it entirely.
 	//
 	// See https://github.com/go-chi/httplog/issues/28.
-	if !verbose {
+	if verbose {
 		r.Use(httplog.RequestLogger(&httplog.Logger{
 			Logger: slog.Default(),
 			Options: httplog.Options{
