@@ -22,6 +22,7 @@
 .passage > svg[viewBox="0 0 260 130"] {
   width: min(100%, 400px) !important;
   height: auto !important;
+  image-rendering: pixelated;
 }
 
 /* Fix inconsistent history buttons */
