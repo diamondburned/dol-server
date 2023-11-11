@@ -51,6 +51,10 @@ func NewExtensionsManagerFromExtensions(extensionConfigs map[string]json.RawMess
 			continue
 		}
 
+		slog.Debug(
+			"created extension",
+			"extension", ext.ID)
+
 		extensions = append(extensions, extension{e, ext.ID})
 	}
 

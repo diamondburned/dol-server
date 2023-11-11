@@ -329,9 +329,6 @@ func (e *autosyncExtension) writeSaveData(data *SaveData) error {
 	return nil
 }
 
-// ID implements extension.Extension.
-func (e *autosyncExtension) ID() string { return "autosync" }
-
 // Start implements extension.Extension.
 func (e *autosyncExtension) Start(context.Context) error { return nil }
 

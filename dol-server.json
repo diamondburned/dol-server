@@ -1,6 +1,7 @@
 {
   "game_path": "/home/diamond/Downloads/Degrees of Lewdity",
   "extensions": {
-    "autosync": {}
+    "autosync": {},
+    "extracss": {}
   }
 }

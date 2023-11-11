@@ -18,6 +18,7 @@ import (
 	"libdb.so/hserve"
 
 	_ "libdb.so/dol-server/extension/autosync"
+	_ "libdb.so/dol-server/extension/extracss"
 )
 
 var (
