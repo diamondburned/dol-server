@@ -336,7 +336,7 @@ func (e *autosyncExtension) Start(context.Context) error { return nil }
 func (e *autosyncExtension) Stop() error { return nil }
 
 // JSPath implements extension.ExtensionJSHookable.
-func (e *autosyncExtension) JSPath() string { return "/autosync.js" }
+func (e *autosyncExtension) JSPaths() []string { return []string{"/autosync.js"} }
 
 func hashData(data *SaveData) string {
 	if data == nil {

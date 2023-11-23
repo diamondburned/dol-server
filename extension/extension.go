@@ -25,9 +25,9 @@ type ExtensionHTTPHandler interface {
 type ExtensionJSHookable interface {
 	Extension
 	ExtensionHTTPHandler
-	// JSPath returns the path to the JS file that should be loaded for this
+	// JSPaths returns the paths to the JS files that should be loaded for this
 	// extension. It is relative to the root of the extension.
-	JSPath() string
+	JSPaths() []string
 }
 
 // ExtensionInfo is a struct that contains information about an extension.

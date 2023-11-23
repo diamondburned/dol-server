@@ -16,6 +16,10 @@ import (
 //go:embed *.css
 var cssFiles embed.FS
 
+//go:generate deno bundle updaters.ts updaters_generated.js
+//go:embed updaters_generated.js
+var updatersScript []byte
+
 var cssPaths = func() []string {
 	files, _ := cssFiles.ReadDir(".")
 	paths := make([]string, len(files))
@@ -62,6 +66,7 @@ func New(json.RawMessage) (extension.Extension, error) {
 
 	e := &extraCSSExtension{Mux: chi.NewMux()}
 	e.Get("/inject.js", httputil.BytesServer("text/javascript", injector.Bytes()))
+	e.Get("/updaters.js", httputil.BytesServer("text/javascript", updatersScript))
 	e.Mount("/", http.StripPrefix("/x/extracss", http.FileServer(http.FS(cssFiles))))
 
 	return e, nil
@@ -74,4 +79,9 @@ func (e *extraCSSExtension) Start(context.Context) error { return nil }
 func (e *extraCSSExtension) Stop() error { return nil }
 
 // JSPath implements the extension.ExtensionJSHookable interface.
-func (e *extraCSSExtension) JSPath() string { return "/inject.js" }
+func (e *extraCSSExtension) JSPaths() []string {
+	return []string{
+		"/inject.js",
+		"/updaters.js",
+	}
+}

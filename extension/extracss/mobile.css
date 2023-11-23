@@ -1,21 +1,17 @@
 /* Make clicking links a bit bigger on mobile. */
-@media (max-width: 500px) {
-  .passage > a {
-    display: inline-block;
-    padding-top: 0.5em;
-  }
-  
-  .passage > img.icon {
-    width: 30px;
-    height: auto;
-    vertical-align: middle;
-  }
-  
-  .passage > img.icon + a {
-    margin-left: -30px;
-    padding-left: 30px;
-    vertical-align: top;
-  }
+.passage > a {
+  display: inline-block;
+  padding-top: 0.5em;
+  padding-bottom: 0.25em;
+}
+.passage > img.icon {
+  width: 30px;
+  height: auto;
+  vertical-align: middle;
+}
+.passage > img.icon + a {
+  margin-left: -30px;
+  padding-left: 30px;
 }
 
 /* Minimap */
@@ -26,6 +22,15 @@
 }
 
 /* Fix inconsistent history buttons */
-#ui-bar-history [id|="history"], #ui-bar-toggle {
+#ui-bar-history [id|="history"],
+#ui-bar-toggle {
   font-size: 1.2rem;
+}
+
+/* Slightly improve the Journal */
+[data-overlay="journal"] ul li {
+  margin: 0.5em 0;
+}
+[data-overlay="journal"] .journal-date {
+  color: gold;
 }

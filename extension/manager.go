@@ -124,10 +124,14 @@ func (m *ExtensionsManager) BindRouter(router chi.Router) {
 // JSPaths returns the paths to all JS files that should be loaded for all
 // extensions.
 func (m *ExtensionsManager) JSPaths() []string {
-	var paths []string
+	paths := make([]string, 0, len(m.extensions))
 	for _, ext := range m.extensions {
-		if hookable, ok := ext.Extension.(ExtensionJSHookable); ok {
-			paths = append(paths, "/"+path.Join("x", ext.id, hookable.JSPath()))
+		hookable, ok := ext.Extension.(ExtensionJSHookable)
+		if !ok {
+			continue
+		}
+		for _, p := range hookable.JSPaths() {
+			paths = append(paths, "/"+path.Join("x", ext.id, p))
 		}
 	}
 	return paths
