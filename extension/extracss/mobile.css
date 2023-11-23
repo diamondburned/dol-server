@@ -34,3 +34,7 @@
 [data-overlay="journal"] .journal-date {
   color: gold;
 }
+[data-overlay="journal"] .journal-today,
+[data-overlay="journal"] .journal-tomorrow {
+  text-shadow: 0 0 0.25em #ffd700aa;
+}

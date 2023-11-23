@@ -1,3 +1,5 @@
+import { html } from "https://deno.land/x/html@v1.2.0/mod.ts";
+
 const updates: Updater[] = [
   {
     selector: `[data-overlay="journal"] ul li`,
@@ -5,7 +7,18 @@ const updates: Updater[] = [
       listItems.forEach((li) => {
         li.innerHTML = li.textContent.replaceAll(
           /(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|today|tomorrow|in \d* days|\d{2}:\d{2})/g,
-          `<span class="journal-date">$1</span>`,
+          (match) => {
+            const classes = ["journal-date"];
+            switch (match) {
+              case "today":
+                classes.push("journal-today");
+                break;
+              case "tomorrow":
+                classes.push("journal-tomorrow");
+                break;
+            }
+            return html`<span class="${classes.join(" ")}">${match}</span>`;
+          },
         );
       });
     },
