@@ -23,5 +23,6 @@ pkgs.mkShell {
 		gopls
 		gotools
 		deno
+		nodePackages.prettier
 	];
 }
