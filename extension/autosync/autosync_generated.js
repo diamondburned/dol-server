@@ -12,20 +12,22 @@ function html(strings, ...values) {
     }
     return parts.join("");
 }
-const initPromise = new Promise((resolve)=>{
-    const observer = new MutationObserver(()=>{
-        const story = document.getElementById("story");
-        if (story !== null) {
-            observer.disconnect();
-            resolve();
-        }
+if (!window.sugarCubeInitPromise) {
+    window.sugarCubeInitPromise = new Promise((resolve)=>{
+        const observer = new MutationObserver(()=>{
+            const story = document.getElementById("story");
+            if (story !== null) {
+                observer.disconnect();
+                resolve();
+            }
+        });
+        observer.observe(document.body, {
+            childList: true
+        });
     });
-    observer.observe(document.body, {
-        childList: true
-    });
-});
+}
 async function waitForSugarCube() {
-    await initPromise;
+    await window.sugarCubeInitPromise;
     if (!window.SugarCube) {
         alert("SugarCube not found after loading #story");
     }
