@@ -12,5 +12,12 @@
   "imports": {
     "#/": "./",
     "std/": "https://deno.land/std@0.188.0/"
+  },
+  "fmt": {
+    "exclude": [
+      "**/*.ts",
+      "**/*.js",
+      "."
+    ]
   }
 }

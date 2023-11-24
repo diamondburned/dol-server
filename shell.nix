@@ -23,6 +23,9 @@ pkgs.mkShell {
 		gopls
 		gotools
 		deno
-		nodePackages.prettier
 	];
+
+	shellHook = ''
+		export PATH="$PATH:${builtins.toString ./.}/bin"
+	'';
 }

@@ -1,0 +1,2 @@
+#!/usr/bin/env -S deno run -A --unstable
+import "npm:prettier-plugin-html-template-literals/cli.js"
