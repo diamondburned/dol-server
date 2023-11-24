@@ -41,13 +41,23 @@ let lastHash: string | null = null;
 
 function overrideLocal(data: string, hash: string) {
   lastHash = hash;
-  SugarCube.Save.deserialize(data);
+  const metadata = SugarCube.Save.deserialize(data);
+  if (metadata) {
+    const stateMetadata: [string, unknown][] = metadata.stateMetadata ?? [];
+    for (const [key, value] of stateMetadata) {
+      SugarCube.State.metadata.set(key, value);
+    }
+  }
 }
 
 async function sync() {
   console.debug("autosync: syncing");
 
-  const data = SugarCube.Save.serialize();
+  const data = SugarCube.Save.serialize({
+    // As far as I can tell, none of DoL uses SugarCube.State.metadata, so
+    // we'll just go ahead and use it however we want.
+    stateMetadata: Array.from(SugarCube.State.metadata.entries()),
+  });
   if (data == null) {
     return;
   }

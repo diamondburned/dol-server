@@ -130,11 +130,19 @@ const SugarCube = await waitForSugarCube();
 let lastHash = null;
 function overrideLocal(data, hash) {
     lastHash = hash;
-    SugarCube.Save.deserialize(data);
+    const metadata = SugarCube.Save.deserialize(data);
+    if (metadata) {
+        const stateMetadata = metadata.stateMetadata ?? [];
+        for (const [key, value] of stateMetadata){
+            SugarCube.State.metadata.set(key, value);
+        }
+    }
 }
 async function sync() {
     console.debug("autosync: syncing");
-    const data = SugarCube.Save.serialize();
+    const data = SugarCube.Save.serialize({
+        stateMetadata: Array.from(SugarCube.State.metadata.entries())
+    });
     if (data == null) {
         return;
     }
