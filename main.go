@@ -19,6 +19,7 @@ import (
 
 	_ "libdb.so/dol-server/extension/autosync"
 	_ "libdb.so/dol-server/extension/extracss"
+	_ "libdb.so/dol-server/extension/reminder"
 )
 
 var (

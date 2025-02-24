@@ -1,5 +1,22 @@
 {
   "version": "3",
+  "packages": {
+    "specifiers": {
+      "npm:prettier-plugin-html-template-literals": "npm:prettier-plugin-html-template-literals@1.0.5_prettier@1.19.1"
+    },
+    "npm": {
+      "prettier-plugin-html-template-literals@1.0.5_prettier@1.19.1": {
+        "integrity": "sha512-IXoenzPTXUTZXx0e71FwdVI/899kjgSbIMCJiZpspGU6V75nh3O2GXYFhC20W6iCZld42c9vworGoikD6hbPCA==",
+        "dependencies": {
+          "prettier": "prettier@1.19.1"
+        }
+      },
+      "prettier@1.19.1": {
+        "integrity": "sha512-s7PoyDv/II1ObgQunCbB9PdLmUcBZcnWOcxDh7O0N/UwDEsHyqkW+Qh28jW+mVuCdx7gLB0BotYI1Y6uI9iyew==",
+        "dependencies": {}
+      }
+    }
+  },
   "remote": {
     "https://deno.land/std@0.185.0/_util/asserts.ts": "178dfc49a464aee693a7e285567b3d0b555dc805ff490505a8aae34f9cfb1462",
     "https://deno.land/std@0.185.0/_util/os.ts": "d932f56d41e4f6a6093d56044e29ce637f8dcc43c5a90af43504a889cf1775e3",

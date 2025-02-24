@@ -19,10 +19,10 @@ declare global {
     addEventListener<K extends keyof SugarCubeEvents>(
       type: K,
       listener: (this: Document, ev: SugarCubeEvents[K]) => unknown,
-      options?: boolean | AddEventListenerOptions,
+      options?: boolean | AddEventListenerOptions
     ): void;
     dispatchEvent<K extends keyof SugarCubeEvents>(
-      event: SugarCubeEvents[K],
+      event: SugarCubeEvents[K]
     ): boolean;
   }
   interface Window {
@@ -32,7 +32,7 @@ declare global {
 }
 
 if (!window.sugarCubeInitPromise) {
-  window.sugarCubeInitPromise = new Promise<void>((resolve) => {
+  window.sugarCubeInitPromise = new Promise<void>(resolve => {
     const observer = new MutationObserver(() => {
       const story = document.getElementById("story");
       if (story !== null) {
